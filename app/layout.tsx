@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/layout/Sidebar";
 import BottomNav from "@/components/layout/BottomNav";
+import SessionProvider from "@/components/auth/SessionProvider";
 
 export const metadata: Metadata = {
   title: {
@@ -15,13 +16,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <div className="flex-1 md:ml-60 min-h-screen">
-            {children}
+        <SessionProvider>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <div className="flex-1 md:ml-60 min-h-screen">
+              {children}
+            </div>
           </div>
-        </div>
-        <BottomNav />
+          <BottomNav />
+        </SessionProvider>
       </body>
     </html>
   );

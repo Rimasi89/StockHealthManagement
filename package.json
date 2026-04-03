@@ -15,7 +15,9 @@
     "recharts": "^2.12.7",
     "lucide-react": "^0.427.0",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.5.2"
+    "tailwind-merge": "^2.5.2",
+    "next-auth": "^4.24.7",
+    "@supabase/supabase-js": "^2.45.4"
   },
   "devDependencies": {
     "typescript": "^5",

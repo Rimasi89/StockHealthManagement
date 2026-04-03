@@ -1,5 +1,6 @@
 "use client";
 import { Bell, Search } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useInsights } from "@/hooks/useInsights";
 
 interface TopBarProps {
@@ -9,6 +10,7 @@ interface TopBarProps {
 
 export default function TopBar({ title, subtitle }: TopBarProps) {
   const { newCount } = useInsights();
+  const { data: session } = useSession();
 
   return (
     <header className="h-16 px-6 md:px-8 flex items-center justify-between border-b border-zinc-100 bg-white/80 backdrop-blur-md sticky top-0 z-20">
@@ -32,7 +34,24 @@ export default function TopBar({ title, subtitle }: TopBarProps) {
           )}
         </button>
 
-        {/* Disclaimer badge */}
+        {/* Auth status / user indicator (mobile) */}
+        {session?.user?.image && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={session.user.image}
+            alt={session.user.name ?? ""}
+            className="md:hidden w-7 h-7 rounded-full object-cover border border-zinc-200"
+            referrerPolicy="no-referrer"
+          />
+        )}
+
+        {/* Live data indicator */}
+        <div className="hidden md:flex items-center gap-1.5 h-6 px-2.5 bg-emerald-50 border border-emerald-200 rounded-full">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-[10px] font-medium text-emerald-700">Live prices</span>
+        </div>
+
+        {/* Disclaimer */}
         <div className="hidden lg:flex items-center h-6 px-2.5 bg-amber-50 border border-amber-200 rounded-full">
           <span className="text-[10px] font-medium text-amber-700">Not financial advice</span>
         </div>

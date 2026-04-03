@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import TopBar from "@/components/layout/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -11,11 +12,14 @@ import { formatCurrency, formatPct, formatDate } from "@/lib/formatters";
 import { getChangeColor } from "@/lib/utils";
 import { SECTOR_COLORS } from "@/lib/constants";
 import { TRANSACTIONS } from "@/lib/mockData";
-import { Plus, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, Trash2, LogIn } from "lucide-react";
+import Link from "next/link";
 
 export default function PortfolioPage() {
-  const { holdings, summary, isLoading } = usePortfolio();
+  const { holdings, summary, isLoading, refetch } = usePortfolio();
+  const { data: session } = useSession();
   const [showAdd, setShowAdd] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Sector allocation for pie chart
   const sectorMap: Record<string, number> = {};
@@ -26,27 +30,55 @@ export default function PortfolioPage() {
     name, value, color: SECTOR_COLORS[name] ?? "#94a3b8",
   }));
 
+  const handleDelete = async (id: string) => {
+    if (!session) return;
+    setDeletingId(id);
+    try {
+      await fetch(`/api/portfolio/${id}`, { method: "DELETE" });
+      await refetch();
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <>
       <TopBar title="Portfolio" subtitle="Your investment positions" />
       <main className="p-6 md:p-8 pb-24 md:pb-8 space-y-6">
 
+        {/* Auth banner */}
+        {!session && (
+          <div className="flex items-center justify-between p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+            <div>
+              <p className="text-sm font-medium text-indigo-800">Viewing demo portfolio</p>
+              <p className="text-xs text-indigo-600 mt-0.5">Sign in to save your real holdings and track live prices</p>
+            </div>
+            <Link href="/login">
+              <Button size="sm">
+                <LogIn size={13} /> Sign in
+              </Button>
+            </Link>
+          </div>
+        )}
+
         {/* Summary banner */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Market Value", value: summary ? formatCurrency(summary.totalValue) : "—", sub: null },
-            { label: "Total Invested", value: summary ? formatCurrency(summary.totalCost) : "—", sub: null },
-            { label: "Unrealized Gain", value: summary ? formatCurrency(summary.totalGain) : "—", sub: summary ? formatPct(summary.totalGainPct) : null, positive: (summary?.totalGain ?? 0) >= 0 },
-            { label: "Today's P&L", value: summary ? formatCurrency(summary.dayGain) : "—", sub: summary ? formatPct(summary.dayGainPct) : null, positive: (summary?.dayGain ?? 0) >= 0 },
-          ].map(({ label, value, sub, positive }) => (
+            { label: "Market Value", value: summary ? formatCurrency(summary.totalValue) : "—", colorVal: null },
+            { label: "Total Invested", value: summary ? formatCurrency(summary.totalCost) : "—", colorVal: null },
+            { label: "Unrealized Gain", value: summary ? formatCurrency(summary.totalGain) : "—", colorVal: summary?.totalGain ?? null },
+            { label: "Today's P&L", value: summary ? formatCurrency(summary.dayGain) : "—", colorVal: summary?.dayGain ?? null },
+          ].map(({ label, value, colorVal }) => (
             <div key={label} className="bg-white rounded-2xl border border-zinc-100 shadow-card p-5">
               <p className="text-xs text-zinc-400 font-medium uppercase tracking-wide mb-2">{label}</p>
               {isLoading
                 ? <Skeleton className="h-7 w-28 mb-1" />
-                : <p className={`text-xl font-semibold font-mono tabular-nums ${sub ? getChangeColor(positive ? 1 : -1) : "text-zinc-900"}`}>{value}</p>
+                : <p className={`text-xl font-semibold font-mono tabular-nums ${colorVal !== null ? getChangeColor(colorVal) : "text-zinc-900"}`}>{value}</p>
               }
-              {sub && !isLoading && (
-                <p className={`text-xs mt-0.5 ${getChangeColor(positive ? 1 : -1)}`}>{sub}</p>
+              {!isLoading && colorVal !== null && summary && (
+                <p className={`text-xs mt-0.5 ${getChangeColor(colorVal)}`}>
+                  {label === "Unrealized Gain" ? formatPct(summary.totalGainPct) : formatPct(summary.dayGainPct)}
+                </p>
               )}
             </div>
           ))}
@@ -57,7 +89,9 @@ export default function PortfolioPage() {
           <Card title="Allocation by Sector">
             {isLoading
               ? <Skeleton className="w-full h-64" />
-              : <PieChartComponent data={pieData} height={160} />
+              : pieData.length > 0
+              ? <PieChartComponent data={pieData} height={160} />
+              : <p className="text-sm text-zinc-400 text-center py-8">No holdings yet</p>
             }
           </Card>
 
@@ -74,7 +108,7 @@ export default function PortfolioPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-zinc-50">
-                      {["Stock", "Shares", "Avg Cost", "Current", "Value", "Gain/Loss", "Alloc"].map((h) => (
+                      {["Stock", "Shares", "Avg Cost", "Current", "Value", "Gain/Loss", "Alloc", session ? "Action" : ""].map((h) => h && (
                         <th key={h} className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wide whitespace-nowrap">
                           {h}
                         </th>
@@ -92,6 +126,14 @@ export default function PortfolioPage() {
                             ))}
                           </tr>
                         ))
+                      : holdings.length === 0
+                      ? (
+                          <tr>
+                            <td colSpan={8} className="px-6 py-12 text-center text-sm text-zinc-400">
+                              No holdings yet. Add your first position.
+                            </td>
+                          </tr>
+                        )
                       : holdings.map((h) => (
                           <tr key={h.id} className="border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors">
                             <td className="px-4 py-3">
@@ -128,16 +170,22 @@ export default function PortfolioPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <div className="w-16 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full bg-indigo-400 rounded-full"
-                                    style={{ width: `${Math.min(h.allocationPct, 100)}%` }}
-                                  />
+                                  <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${Math.min(h.allocationPct, 100)}%` }} />
                                 </div>
-                                <span className="text-xs text-zinc-500 font-mono">
-                                  {h.allocationPct.toFixed(1)}%
-                                </span>
+                                <span className="text-xs text-zinc-500 font-mono">{h.allocationPct.toFixed(1)}%</span>
                               </div>
                             </td>
+                            {session && (
+                              <td className="px-4 py-3">
+                                <button
+                                  onClick={() => handleDelete(h.id)}
+                                  disabled={deletingId === h.id}
+                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))
                     }
@@ -167,15 +215,67 @@ export default function PortfolioPage() {
           </div>
         </Card>
 
-        {/* Add position modal */}
-        {showAdd && <AddPositionModal onClose={() => setShowAdd(false)} />}
+        {showAdd && (
+          <AddPositionModal
+            onClose={() => setShowAdd(false)}
+            onSaved={async () => {
+              setShowAdd(false);
+              await refetch();
+            }}
+            isAuthenticated={!!session}
+          />
+        )}
       </main>
     </>
   );
 }
 
-function AddPositionModal({ onClose }: { onClose: () => void }) {
+function AddPositionModal({
+  onClose, onSaved, isAuthenticated,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+  isAuthenticated: boolean;
+}) {
   const [form, setForm] = useState({ ticker: "", shares: "", avgCost: "", date: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    if (!form.ticker || !form.shares || !form.avgCost) {
+      setError("Ticker, shares, and average cost are required.");
+      return;
+    }
+    if (!isAuthenticated) {
+      setError("Please sign in to save positions permanently.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: form.ticker,
+          shares: Number(form.shares),
+          avg_cost: Number(form.avgCost),
+          purchase_date: form.date || null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Failed to save position.");
+        return;
+      }
+      onSaved();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose} />
@@ -186,7 +286,7 @@ function AddPositionModal({ onClose }: { onClose: () => void }) {
             { label: "Ticker Symbol", key: "ticker", placeholder: "e.g. AAPL" },
             { label: "Number of Shares", key: "shares", placeholder: "e.g. 10" },
             { label: "Average Cost per Share ($)", key: "avgCost", placeholder: "e.g. 172.50" },
-            { label: "Purchase Date", key: "date", placeholder: "YYYY-MM-DD" },
+            { label: "Purchase Date (optional)", key: "date", placeholder: "YYYY-MM-DD" },
           ].map(({ label, key, placeholder }) => (
             <div key={key}>
               <label className="block text-xs font-medium text-zinc-600 mb-1.5">{label}</label>
@@ -198,14 +298,19 @@ function AddPositionModal({ onClose }: { onClose: () => void }) {
               />
             </div>
           ))}
+          {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
         <div className="flex gap-3 mt-6">
           <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
-          <Button className="flex-1" onClick={onClose}>Add Position</Button>
+          <Button className="flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving…" : "Add Position"}
+          </Button>
         </div>
-        <p className="text-[10px] text-zinc-400 text-center mt-3">
-          Demo mode — changes are not persisted
-        </p>
+        {!isAuthenticated && (
+          <p className="text-[10px] text-zinc-400 text-center mt-3">
+            <Link href="/login" className="text-indigo-600 underline">Sign in</Link> to save positions permanently
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,24 +1,31 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { RAW_HOLDINGS, STOCKS, PORTFOLIO_HISTORY } from "@/lib/mockData";
-import type { Holding, PortfolioSummary } from "@/types/portfolio";
+import type { Holding, RawHolding, PortfolioSummary } from "@/types/portfolio";
 import type { ChartDataPoint } from "@/types/chart";
 
-function computeHoldings(): Holding[] {
-  const quoteMap = Object.fromEntries(STOCKS.map((s) => [s.ticker, s]));
-  const raw = RAW_HOLDINGS.map((h) => {
-    const quote = quoteMap[h.ticker];
-    const currentPrice = quote?.price ?? h.avgCost;
+// ─── Derived computation ───────────────────────────────────────────────────────
+function computeHoldings(
+  rawHoldings: RawHolding[],
+  quotes: Record<string, { price: number; change: number; changePct: number }>
+): Holding[] {
+  const enriched = rawHoldings.map((h) => {
+    const q = quotes[h.ticker];
+    const currentPrice = q?.price ?? h.avgCost;
     const marketValue = currentPrice * h.shares;
     const totalCost = h.avgCost * h.shares;
     const unrealizedGain = marketValue - totalCost;
-    const unrealizedGainPct = (unrealizedGain / totalCost) * 100;
-    const dayChange = (quote?.change ?? 0) * h.shares;
-    const dayChangePct = quote?.changePct ?? 0;
+    const unrealizedGainPct = totalCost > 0 ? (unrealizedGain / totalCost) * 100 : 0;
+    const dayChange = (q?.change ?? 0) * h.shares;
+    const dayChangePct = q?.changePct ?? 0;
     return { ...h, currentPrice, marketValue, totalCost, unrealizedGain, unrealizedGainPct, allocationPct: 0, dayChange, dayChangePct };
   });
-  const totalValue = raw.reduce((sum, h) => sum + h.marketValue, 0);
-  return raw.map((h) => ({ ...h, allocationPct: (h.marketValue / totalValue) * 100 }));
+  const totalValue = enriched.reduce((s, h) => s + h.marketValue, 0);
+  return enriched.map((h) => ({
+    ...h,
+    allocationPct: totalValue > 0 ? (h.marketValue / totalValue) * 100 : 0,
+  }));
 }
 
 function computeSummary(holdings: Holding[]): PortfolioSummary {
@@ -30,29 +37,96 @@ function computeSummary(holdings: Holding[]): PortfolioSummary {
     totalValue,
     totalCost,
     totalGain,
-    totalGainPct: (totalGain / totalCost) * 100,
+    totalGainPct: totalCost > 0 ? (totalGain / totalCost) * 100 : 0,
     dayGain,
-    dayGainPct: (dayGain / (totalValue - dayGain)) * 100,
+    dayGainPct: totalValue - dayGain > 0 ? (dayGain / (totalValue - dayGain)) * 100 : 0,
     cashBalance: 4_280.50,
   };
 }
 
+// ─── Hook ──────────────────────────────────────────────────────────────────────
 export function usePortfolio() {
+  const { data: session, status } = useSession();
   const [isLoading, setIsLoading] = useState(true);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
-  const [history, setHistory] = useState<ChartDataPoint[]>([]);
+  const [history] = useState<ChartDataPoint[]>(PORTFOLIO_HISTORY);
+
+  const loadPortfolio = useCallback(async () => {
+    setIsLoading(true);
+
+    try {
+      if (session?.user?.id) {
+        // ── Authenticated: load real data ──────────────────────────────────
+        const holdingsRes = await fetch("/api/portfolio");
+
+        if (holdingsRes.ok) {
+          const dbHoldings: Array<{
+            id: string; ticker: string; name: string; sector: string;
+            shares: number; avg_cost: number;
+          }> = await holdingsRes.json();
+
+          if (dbHoldings.length > 0) {
+            // Batch-fetch live quotes
+            const tickers = [...new Set(dbHoldings.map((h) => h.ticker))];
+            const quotesRes = await fetch(`/api/stocks/quotes?tickers=${tickers.join(",")}`);
+            const quotesMap = quotesRes.ok ? await quotesRes.json() : {};
+
+            const rawHoldings: RawHolding[] = dbHoldings.map((h) => ({
+              id: h.id,
+              ticker: h.ticker,
+              name: h.name,
+              sector: h.sector,
+              shares: h.shares,
+              avgCost: h.avg_cost,
+            }));
+
+            const computed = computeHoldings(rawHoldings, quotesMap);
+            setHoldings(computed);
+            setSummary(computeSummary(computed));
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+    } catch {
+      // Fall through to mock data
+    }
+
+    // ── Unauthenticated or DB empty: use mock data with live prices ────────
+    try {
+      const tickers = RAW_HOLDINGS.map((h) => h.ticker);
+      const quotesRes = await fetch(`/api/stocks/quotes?tickers=${tickers.join(",")}`);
+      const quotesMap = quotesRes.ok ? await quotesRes.json() : {};
+
+      // Merge live prices with mock holdings if available
+      const fallbackQuotes: Record<string, { price: number; change: number; changePct: number }> = {};
+      for (const stock of STOCKS) {
+        fallbackQuotes[stock.ticker] = { price: stock.price, change: stock.change, changePct: stock.changePct };
+      }
+      const merged = { ...fallbackQuotes, ...quotesMap };
+
+      const computed = computeHoldings(RAW_HOLDINGS, merged);
+      setHoldings(computed);
+      setSummary(computeSummary(computed));
+    } catch {
+      // Pure mock fallback
+      const mockQuotes: Record<string, { price: number; change: number; changePct: number }> = {};
+      for (const stock of STOCKS) {
+        mockQuotes[stock.ticker] = { price: stock.price, change: stock.change, changePct: stock.changePct };
+      }
+      const computed = computeHoldings(RAW_HOLDINGS, mockQuotes);
+      setHoldings(computed);
+      setSummary(computeSummary(computed));
+    }
+    setIsLoading(false);
+  }, [session]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const h = computeHoldings();
-      setHoldings(h);
-      setSummary(computeSummary(h));
-      setHistory(PORTFOLIO_HISTORY);
-      setIsLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
+    if (status !== "loading") {
+      loadPortfolio();
+    }
+  }, [loadPortfolio, status]);
 
-  return { holdings, summary, history, isLoading };
+  return { holdings, summary, history, isLoading, refetch: loadPortfolio };
 }
