@@ -20,7 +20,7 @@ type Indicator = "volume" | "rsi" | "macd";
 export default function AnalysisPage() {
   const [ticker, setTicker] = useState("AAPL");
   const [range, setRange] = useState<TimeRange>("1M");
-  const [indicators, setIndicators] = useState<Set<Indicator>>(new Set(["volume"]));
+  const [indicators, setIndicators] = useState<Set<Indicator>>(new Set<Indicator>(["volume"]));
   const { data, technicals, quote, isLoading } = useStockData(ticker, range);
 
   const toggleIndicator = (ind: Indicator) => {

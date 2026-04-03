@@ -1,6 +1,6 @@
 "use client";
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, defs, linearGradient, stop,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import type { ChartDataPoint } from "@/types/chart";
 import ChartTooltip from "@/components/ui/ChartTooltip";
